@@ -49,17 +49,14 @@
 #include <tuple>
 #include <vector>
 
-namespace qi = boost::spirit::qi;
-namespace ph = boost::phoenix;
-
 namespace
 {
 struct Segment final
 {
     std::uint64_t from, to;
     Segment() : from(0), to(0) {}
-    Segment(const std::uint64_t &from, const std::uint64_t &to) : from(from), to(to) {}
-    Segment(const OSMNodeID &from, const OSMNodeID &to)
+    Segment(const std::uint64_t from, const std::uint64_t to) : from(from), to(to) {}
+    Segment(const OSMNodeID from, const OSMNodeID to)
         : from(static_cast<std::uint64_t>(from)), to(static_cast<std::uint64_t>(to))
     {
     }
@@ -84,11 +81,11 @@ struct Turn final
 {
     std::uint64_t from, via, to;
     Turn() : from(0), via(0), to(0) {}
-    Turn(const std::uint64_t &from, const std::uint64_t &via, const std::uint64_t &to)
+    Turn(const std::uint64_t from, const std::uint64_t via, const std::uint64_t to)
         : from(from), via(via), to(to)
     {
     }
-    Turn(const OSMNodeID &from, const OSMNodeID &via, const OSMNodeID &to)
+    Turn(const OSMNodeID from, const OSMNodeID via, const OSMNodeID to)
         : from(static_cast<std::uint64_t>(from)), via(static_cast<std::uint64_t>(via)),
           to(static_cast<std::uint64_t>(to))
     {
@@ -116,101 +113,122 @@ template <typename T> inline bool is_aligned(const void *pointer)
 }
 } // anon ns
 
-BOOST_FUSION_ADAPT_STRUCT(Segment, (std::uint64_t, from)(std::uint64_t, to))
-BOOST_FUSION_ADAPT_STRUCT(SpeedSource, (unsigned, speed))
-BOOST_FUSION_ADAPT_STRUCT(Turn, (std::uint64_t, from)(std::uint64_t, via)(std::uint64_t, to))
-BOOST_FUSION_ADAPT_STRUCT(PenaltySource, (double, penalty))
-
-// Function parses a list of CSV files using "key,value,comment" grammar.
-// Key and Value structures must be a model of Random Access Sequence.
-// Also the Value structure must have source member that will be filled
-// with the index of the csv_filenames array.
-// Function returns a lambda function that maps input Key to boost::optional<Value>
-template <typename Key, typename Value>
-auto ParseCSV(
-    const std::vector<std::string> &csv_filenames,
-    const qi::rule<boost::spirit::line_pos_iterator<boost::spirit::istream_iterator>, Key()> &key,
-    const qi::rule<boost::spirit::line_pos_iterator<boost::spirit::istream_iterator>, Value()>
-        &value)
-{
-    try
-    {
-        tbb::spin_mutex mutex;
-        std::vector<std::pair<Key, Value>> lookup;
-        tbb::parallel_for(
-            std::size_t{0},
-            csv_filenames.size(),
-            [&](const std::size_t idx) {
-                const auto file_id = idx + 1; // starts at one, zero means we assigned the weight
-                const auto &filename = csv_filenames[idx];
-
-                std::ifstream input_stream(filename, std::ios::binary);
-                input_stream.unsetf(std::ios::skipws);
-
-                using Iterator = boost::spirit::line_pos_iterator<boost::spirit::istream_iterator>;
-                boost::spirit::istream_iterator sfirst(input_stream), slast;
-                Iterator first(sfirst), last(slast);
-
-                qi::rule<Iterator, Value()> value_source =
-                    value[qi::_val = qi::_1, ph::bind(&Value::source, qi::_val) = file_id];
-                qi::rule<Iterator, std::pair<Key, Value>()> csv_line =
-                    (key >> ',' >> value_source) >> -(',' >> *(qi::char_ - qi::eol));
-                std::vector<std::pair<Key, Value>> local;
-                const auto ok = qi::parse(first, last, (csv_line % qi::eol) >> *qi::eol, local);
-
-                if (!ok || first != last)
-                {
-                    const auto message = boost::format("CSV file %1% malformed on line %2%") %
-                                         filename % first.position();
-                    throw osrm::util::exception(message.str() + SOURCE_REF);
-                }
-
-                osrm::util::Log() << "Loaded " << filename << " with " << local.size() << "values";
-
-                {
-                    tbb::spin_mutex::scoped_lock _{mutex};
-                    lookup.insert(end(lookup),
-                                  std::make_move_iterator(begin(local)),
-                                  std::make_move_iterator(end(local)));
-                }
-            });
-
-        // With flattened map-ish view of all the files, sort and unique them on key and source.
-        // The greater '>' is used here since we want to give files later on higher precedence.
-        std::stable_sort(begin(lookup), end(lookup), [](const auto &lhs, const auto &rhs) {
-            return lhs.first < rhs.first ||
-                   (lhs.first == rhs.first && lhs.second.source > rhs.second.source);
-        });
-
-        // Unique only on key to take the source precedence into account and remove duplicates.
-        const auto it =
-            std::unique(begin(lookup), end(lookup), [](const auto &lhs, const auto &rhs) {
-                return lhs.first == rhs.first;
-            });
-        lookup.erase(it, end(lookup));
-
-        osrm::util::Log() << "In total loaded " << csv_filenames.size()
-                          << " file(s) with a total of " << lookup.size() << " unique values";
-
-        return [lookup](const Key &key) {
-            const auto it = std::lower_bound(
-                std::begin(lookup), std::end(lookup), key, [](const auto &lhs, const auto &rhs) {
-                    return lhs.first < rhs;
-                });
-            return it != std::end(lookup) && !(key < it->first) ? boost::optional<Value>(it->second)
-                                                                : boost::optional<Value>();
-        };
-    }
-    catch (const tbb::captured_exception &e)
-    {
-        throw osrm::util::exception(e.what() + SOURCE_REF);
-    }
-}
+BOOST_FUSION_ADAPT_STRUCT(Segment, (auto, from)(auto, to))
+BOOST_FUSION_ADAPT_STRUCT(SpeedSource, (auto, speed))
+BOOST_FUSION_ADAPT_STRUCT(Turn, (auto, from)(auto, via)(auto, to))
+BOOST_FUSION_ADAPT_STRUCT(PenaltySource, (auto, penalty))
 
 namespace osrm
 {
 namespace contractor
 {
+namespace
+{
+namespace qi = boost::spirit::qi;
+}
+
+// Functor to parse a list of CSV files using "key,value,comment" grammar.
+// Key and Value structures must be a model of Random Access Sequence.
+// Also the Value structure must have source member that will be filled
+// with the corresponding file index in the CSV filenames vector.
+template <typename Key, typename Value> struct CSVFilesParser
+{
+    using Iterator = boost::spirit::line_pos_iterator<boost::spirit::istream_iterator>;
+    using KeyRule = qi::rule<Iterator, Key()>;
+    using ValueRule = qi::rule<Iterator, Value()>;
+
+    CSVFilesParser(const KeyRule &key_rule, const ValueRule &value_rule)
+        : key_rule(key_rule), value_rule(value_rule)
+    {
+    }
+
+    // Operator returns a lambda function that maps input Key to boost::optional<Value>.
+    auto operator()(const std::vector<std::string> &csv_filenames) const
+    {
+        try
+        {
+            tbb::spin_mutex mutex;
+            std::vector<std::pair<Key, Value>> lookup;
+            tbb::parallel_for(std::size_t{0},
+                              csv_filenames.size(),
+                              [&](const std::size_t idx) {
+                                  // id starts at one, 0 means we assigned the weight from profile
+                                  auto local = ParseCSVFile(csv_filenames[idx], idx + 1);
+
+                                  { // Merge local CSV results into a flat global vector
+                                      tbb::spin_mutex::scoped_lock _{mutex};
+                                      lookup.insert(end(lookup),
+                                                    std::make_move_iterator(begin(local)),
+                                                    std::make_move_iterator(end(local)));
+                                  }
+                              });
+
+            // With flattened map-ish view of all the files, make a stable sort on key and source
+            // and unique them on key to keep only the value with the largest file index
+            // and the largest line number in a file.
+            // The operands order is swapped to make descending ordering on (key, source)
+            std::stable_sort(begin(lookup), end(lookup), [](const auto &lhs, const auto &rhs) {
+                return rhs.first < lhs.first ||
+                       (rhs.first == lhs.first && rhs.second.source < lhs.second.source);
+            });
+
+            // Unique only on key to take the source precedence into account and remove duplicates.
+            const auto it =
+                std::unique(begin(lookup), end(lookup), [](const auto &lhs, const auto &rhs) {
+                    return lhs.first == rhs.first;
+                });
+            lookup.erase(it, end(lookup));
+
+            osrm::util::Log() << "In total loaded " << csv_filenames.size()
+                              << " file(s) with a total of " << lookup.size() << " unique values";
+
+            return [lookup](const Key &key) {
+                using Result = boost::optional<Value>;
+                const auto it = std::lower_bound(
+                    lookup.begin(), lookup.end(), key, [](const auto &lhs, const auto &rhs) {
+                        return rhs < lhs.first;
+                    });
+                return it != std::end(lookup) && !(it->first < key) ? Result(it->second) : Result();
+            };
+        }
+        catch (const tbb::captured_exception &e)
+        {
+            throw osrm::util::exception(e.what() + SOURCE_REF);
+        }
+    }
+
+  private:
+    // Parse a single CSV file and return result as a vector<Key, Value>
+    auto ParseCSVFile(const std::string &filename, std::size_t file_id) const
+    {
+        std::ifstream input_stream(filename, std::ios::binary);
+        input_stream.unsetf(std::ios::skipws);
+
+        boost::spirit::istream_iterator sfirst(input_stream), slast;
+        Iterator first(sfirst), last(slast);
+
+        ValueRule value_source =
+            value_rule[qi::_val = qi::_1, boost::phoenix::bind(&Value::source, qi::_val) = file_id];
+        qi::rule<Iterator, std::pair<Key, Value>()> csv_line =
+            (key_rule >> ',' >> value_source) >> -(',' >> *(qi::char_ - qi::eol));
+        std::vector<std::pair<Key, Value>> result;
+        const auto ok = qi::parse(first, last, (csv_line % qi::eol) >> *qi::eol, result);
+
+        if (!ok || first != last)
+        {
+            const auto message =
+                boost::format("CSV file %1% malformed on line %2%") % filename % first.position();
+            throw osrm::util::exception(message.str() + SOURCE_REF);
+        }
+
+        osrm::util::Log() << "Loaded " << filename << " with " << result.size() << "values";
+
+        return std::move(result);
+    }
+
+    KeyRule key_rule;
+    ValueRule value_rule;
+};
 
 // Returns duration in deci-seconds
 inline EdgeWeight ConvertToDuration(double distance_in_meters, double speed_in_kmh)
@@ -232,8 +250,8 @@ EdgeWeight GetNewWeight(const SpeedSource &value,
 {
     const auto new_segment_weight =
         (value.speed > 0) ? ConvertToDuration(segment_length, value.speed) : INVALID_EDGE_WEIGHT;
-    // the check here is enabled by the `--edge-weight-updates-over-factor` flag
-    // it logs a warning if the new weight exceeds a heuristic of what a reasonable weight update is
+    // the check here is enabled by the `--edge-weight-updates-over-factor` flag it logs
+    // a warning if the new weight exceeds a heuristic of what a reasonable weight update is
     if (log_edge_updates_factor > 0 && old_weight != 0)
     {
         auto new_secs = new_segment_weight / 10.0;
@@ -448,13 +466,12 @@ EdgeID Contractor::LoadEdgeExpandedGraph(
     edge_based_edge_list.resize(graph_header.number_of_edges);
     util::Log() << "Reading " << graph_header.number_of_edges << " edges from the edge based graph";
 
-    auto segment_speed_lookup = ParseCSV<Segment, SpeedSource>(
-        segment_speed_filenames, qi::ulong_long >> ',' >> qi::ulong_long, qi::uint_);
+    auto segment_speed_lookup = CSVFilesParser<Segment, SpeedSource>(
+        qi::ulong_long >> ',' >> qi::ulong_long, qi::uint_)(segment_speed_filenames);
 
-    auto turn_penalty_lookup = ParseCSV<Turn, PenaltySource>(
-        turn_penalty_filenames,
+    auto turn_penalty_lookup = CSVFilesParser<Turn, PenaltySource>(
         qi::ulong_long >> ',' >> qi::ulong_long >> ',' >> qi::ulong_long,
-        qi::double_);
+        qi::double_)(turn_penalty_filenames);
 
     // If we update the edge weights, this file will hold the datasource information for each
     // segment; the other files will also be conditionally filled concurrently if we make an update
