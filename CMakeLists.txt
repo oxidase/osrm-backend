@@ -622,6 +622,9 @@ if(BUILD_TOOLS)
   add_executable(osrm-io-benchmark src/tools/io-benchmark.cpp $<TARGET_OBJECTS:UTIL>)
   target_link_libraries(osrm-io-benchmark ${BOOST_BASE_LIBRARIES})
 
+  add_executable(osrm-dump-data src/tools/dump-data.cpp)
+  target_link_libraries(osrm-dump-data osrm ${Boost_PROGRAM_OPTIONS_LIBRARY} ${BOOST_BASE_LIBRARIES} ${MAYBE_RT_LIBRARY})
+
   install(TARGETS osrm-io-benchmark DESTINATION bin)
 
   find_package(Shapefile) # package libshp-dev

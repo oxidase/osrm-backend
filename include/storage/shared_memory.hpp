@@ -72,7 +72,7 @@ class SharedMemory
             util::Log(logDEBUG) << "opening/creating " << shm.get_shmid() << " from id " << id
                                 << " with size " << size;
 #ifdef __linux__
-            if (-1 == shmctl(shm.get_shmid(), SHM_LOCK, nullptr))
+            if (-1 == shmctl(shm.get_shmid(), SHM_UNLOCK, nullptr))
             {
                 if (ENOMEM == errno)
                 {
