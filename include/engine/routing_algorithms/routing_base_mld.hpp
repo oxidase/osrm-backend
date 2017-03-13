@@ -118,8 +118,7 @@ void routingStep(const datafacade::ContiguousInternalMemoryDataFacade<Algorithm>
                     }
                     else if (to_weight < forward_heap.GetKey(to))
                     {
-                        forward_heap.GetData(to) = {node, true};
-                        forward_heap.DecreaseKey(to, to_weight);
+                        forward_heap.DecreaseKey(to, to_weight, {node, true});
                     }
                 }
                 ++destination;
@@ -143,8 +142,7 @@ void routingStep(const datafacade::ContiguousInternalMemoryDataFacade<Algorithm>
                     }
                     else if (to_weight < forward_heap.GetKey(to))
                     {
-                        forward_heap.GetData(to) = {node, true};
-                        forward_heap.DecreaseKey(to, to_weight);
+                        forward_heap.DecreaseKey(to, to_weight, {node, true});
                     }
                 }
                 ++source;
@@ -171,8 +169,7 @@ void routingStep(const datafacade::ContiguousInternalMemoryDataFacade<Algorithm>
                 }
                 else if (to_weight < forward_heap.GetKey(to))
                 {
-                    forward_heap.GetData(to) = {node, false};
-                    forward_heap.DecreaseKey(to, to_weight);
+                    forward_heap.DecreaseKey(to, to_weight, {node, false});
                 }
             }
         }
