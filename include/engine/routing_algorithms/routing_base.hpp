@@ -37,22 +37,159 @@ static constexpr bool FORWARD_DIRECTION = true;
 static constexpr bool REVERSE_DIRECTION = false;
 static constexpr bool DO_NOT_FORCE_LOOPS = false;
 
-template <bool DIRECTION, typename Heap>
-void insertNodesInHeap(Heap &heap, const PhantomNode &phantom_node)
+template <typename Facade, typename Heap>
+void insertSourceNodeInHeap(const Facade &facade, Heap &heap, const PhantomNode &phantom_node)
 {
     BOOST_ASSERT(phantom_node.IsValid());
 
-    const auto weight_sign = DIRECTION == FORWARD_DIRECTION ? -1 : 1;
+    // Insert and delete source nodes
+    if (phantom_node.forward_segment_id.enabled)
+    {
+        const auto node = phantom_node.forward_segment_id.id;
+        heap.Insert(node, 0, node);
+        heap.DeleteMin();
+    }
+    if (phantom_node.reverse_segment_id.enabled)
+    {
+        const auto node = phantom_node.reverse_segment_id.id;
+        heap.Insert(node, 0, node);
+        heap.DeleteMin();
+    }
+
+    // Insert nodes adjacent to sources with adjusted weights
+    if (phantom_node.forward_segment_id.enabled)
+    {
+        const auto node = phantom_node.forward_segment_id.id;
+        for (auto edge : facade.GetAdjacentEdgeRange(node))
+        {
+            const auto &edge_data = facade.GetEdgeData(edge);
+            if (edge_data.forward)
+            {
+                const NodeID to = facade.GetTarget(edge);
+                const EdgeWeight to_weight = edge_data.weight - phantom_node.GetForwardWeightPlusOffset();
+                BOOST_ASSERT(to_weight >= 0);
+                if (!heap.WasInserted(to))
+                {
+                    heap.Insert(to, to_weight, {node});
+                }
+                else if (to_weight < heap.GetKey(to))
+                {
+                    heap.GetData(to) = {node};
+                    heap.DecreaseKey(to, to_weight);
+                }
+            }
+        }
+    }
+
+    if (phantom_node.reverse_segment_id.enabled)
+    {
+        const auto node = phantom_node.reverse_segment_id.id;
+        for (auto edge : facade.GetAdjacentEdgeRange(node))
+        {
+            const auto &edge_data = facade.GetEdgeData(edge);
+            if (edge_data.forward)
+            {
+                const NodeID to = facade.GetTarget(edge);
+                const EdgeWeight to_weight = edge_data.weight - phantom_node.GetReverseWeightPlusOffset();
+                BOOST_ASSERT(to_weight >= 0);
+                if (!heap.WasInserted(to))
+                {
+                    heap.Insert(to, to_weight, {node});
+                }
+                else if (to_weight < heap.GetKey(to))
+                {
+                    heap.GetData(to) = {node};
+                    heap.DecreaseKey(to, to_weight);
+                }
+            }
+        }
+    }
+}
+
+template <typename Facade>
+void insertSourceNodeInHeap(const Facade &facade, SearchEngineData::MultiLayerDijkstraHeap &heap, const PhantomNode &phantom_node)
+{
+    BOOST_ASSERT(phantom_node.IsValid());
+
+    // Insert and delete source nodes
+    if (phantom_node.forward_segment_id.enabled)
+    {
+        const auto node = phantom_node.forward_segment_id.id;
+        heap.Insert(node, 0, node);
+        heap.DeleteMin();
+    }
+    if (phantom_node.reverse_segment_id.enabled)
+    {
+        const auto node = phantom_node.reverse_segment_id.id;
+        heap.Insert(node, 0, node);
+        heap.DeleteMin();
+    }
+
+    // Insert nodes adjacent to sources with adjusted weights
+    if (phantom_node.forward_segment_id.enabled)
+    {
+        const auto node = phantom_node.forward_segment_id.id;
+        for (auto edge : facade.GetAdjacentEdgeRange(node))
+        {
+            const auto &edge_data = facade.GetEdgeData(edge);
+            if (edge_data.forward)
+            {
+                const NodeID to = facade.GetTarget(edge);
+                const EdgeWeight to_weight = edge_data.weight - phantom_node.GetForwardWeightPlusOffset();
+                BOOST_ASSERT(to_weight >= 0);
+                if (!heap.WasInserted(to))
+                {
+                    heap.Insert(to, to_weight, {node, edge});
+                }
+                else if (to_weight < heap.GetKey(to))
+                {
+                    heap.GetData(to) = {node, edge};
+                    heap.DecreaseKey(to, to_weight);
+                }
+            }
+        }
+    }
+
+    if (phantom_node.reverse_segment_id.enabled)
+    {
+        const auto node = phantom_node.reverse_segment_id.id;
+        for (auto edge : facade.GetAdjacentEdgeRange(node))
+        {
+            const auto &edge_data = facade.GetEdgeData(edge);
+            if (edge_data.forward)
+            {
+                const NodeID to = facade.GetTarget(edge);
+                const EdgeWeight to_weight = edge_data.weight - phantom_node.GetReverseWeightPlusOffset();
+                BOOST_ASSERT(to_weight >= 0);
+                if (!heap.WasInserted(to))
+                {
+                    heap.Insert(to, to_weight, {node, edge});
+                }
+                else if (to_weight < heap.GetKey(to))
+                {
+                    heap.GetData(to) = {node, edge};
+                    heap.DecreaseKey(to, to_weight);
+                }
+            }
+        }
+    }
+}
+
+template <typename Heap>
+void insertTargetNodeInHeap(Heap &heap, const PhantomNode &phantom_node)
+{
+    BOOST_ASSERT(phantom_node.IsValid());
+
     if (phantom_node.forward_segment_id.enabled)
     {
         heap.Insert(phantom_node.forward_segment_id.id,
-                    weight_sign * phantom_node.GetForwardWeightPlusOffset(),
+                    phantom_node.GetForwardWeightPlusOffset(),
                     phantom_node.forward_segment_id.id);
     }
     if (phantom_node.reverse_segment_id.enabled)
     {
         heap.Insert(phantom_node.reverse_segment_id.id,
-                    weight_sign * phantom_node.GetReverseWeightPlusOffset(),
+                    phantom_node.GetReverseWeightPlusOffset(),
                     phantom_node.reverse_segment_id.id);
     }
 }
@@ -79,11 +216,11 @@ void insertNodesInHeap(SearchEngineData::ManyToManyQueryHeap &heap, const Phanto
     }
 }
 
-template <typename Heap>
-void insertNodesInHeaps(Heap &forward_heap, Heap &reverse_heap, const PhantomNodes &nodes)
+template <typename Facade, typename Heap>
+void insertNodesInHeaps(const Facade &facade, Heap &forward_heap, Heap &reverse_heap, const PhantomNodes &nodes)
 {
-    insertNodesInHeap<FORWARD_DIRECTION>(forward_heap, nodes.source_phantom);
-    insertNodesInHeap<REVERSE_DIRECTION>(reverse_heap, nodes.target_phantom);
+    insertSourceNodeInHeap(facade, forward_heap, nodes.source_phantom);
+    insertTargetNodeInHeap(reverse_heap, nodes.target_phantom);
 }
 
 template <typename FacadeT>

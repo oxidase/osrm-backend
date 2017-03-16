@@ -413,7 +413,7 @@ getNetworkDistance(const datafacade::ContiguousInternalMemoryDataFacade<algorith
     forward_core_heap.Clear();
     reverse_core_heap.Clear();
 
-    insertNodesInHeaps(forward_heap, reverse_heap, {source_phantom, target_phantom});
+    insertNodesInHeaps(facade, forward_heap, reverse_heap, {source_phantom, target_phantom});
 
     EdgeWeight weight = INVALID_EDGE_WEIGHT;
     std::vector<NodeID> packed_path;
