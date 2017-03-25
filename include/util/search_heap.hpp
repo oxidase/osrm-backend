@@ -1,6 +1,8 @@
 #ifndef OSRM_UTIL_SEARCH_HEAP_HPP
 #define OSRM_UTIL_SEARCH_HEAP_HPP
 
+#include "util/hopscotch_map.h"
+
 #include <boost/heap/d_ary_heap.hpp>
 
 #include <deque>
@@ -21,7 +23,8 @@ template <typename NodeID, typename Weight, typename Data = void> struct SearchH
     struct NodeData;
     using DataContainer = std::deque<NodeData>;
     using DataReference = typename std::add_pointer<typename DataContainer::reference>::type;
-    using DataIndex = std::unordered_map<NodeID, DataReference>;
+    //using DataIndex = std::unordered_map<NodeID, DataReference>;
+    using DataIndex = tsl::hopscotch_map<NodeID, DataReference, std::hash<NodeID>, std::equal_to<NodeID>, std::allocator<std::pair<NodeID, DataReference>>, 30, true>;
     using HeapData = std::pair<WeightType, DataReference>;
     using HeapContainer = boost::heap::d_ary_heap<HeapData,
                                                   boost::heap::arity<4>,
