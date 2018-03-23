@@ -43,8 +43,8 @@ BOOST_AUTO_TEST_CASE(rw_short)
 BOOST_AUTO_TEST_CASE(rw_bool)
 {
     std::size_t num_elements = 1000;
-    std::unique_ptr<char[]> data = std::make_unique<char[]>(num_elements / sizeof(std::uint32_t));
-    util::vector_view<bool> view(reinterpret_cast<std::uint32_t *>(data.get()), num_elements);
+    std::unique_ptr<char[]> data = std::make_unique<char[]>(num_elements / sizeof(std::uint64_t));
+    util::vector_view<bool> view(reinterpret_cast<std::uint64_t *>(data.get()), num_elements);
     std::vector<bool> reference;
 
     std::mt19937 rng;
